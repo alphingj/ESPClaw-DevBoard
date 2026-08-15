@@ -86,7 +86,7 @@ jobs:
           . $IDF_PATH/export.sh
           idf.py set-target ${{ inputs.target || 'esp32' }}
           idf.py build 2>&1 | tee build_log.txt
-          tail -1 build_log.txt | grep -q 'Project build complete' || { echo '::error::Build did not complete - see build_log.txt'; exit 1; }
+          grep -q 'Project build complete' build_log.txt || { echo '::error::Build did not complete - see build_log.txt'; exit 1; }
 
       - name: Report app size
         working-directory: esp-claw/application/edge_agent
@@ -97,7 +97,7 @@ jobs:
               size = json.load(f)
           app = size.get('app', {})
           print(f"::notice::edge_agent app size: {app.get('total', 'n/a')} bytes "
-                f"({app.get('total', 0) / 1024:.1f} KB) of ota_0 partition (1500K)")
+                f"({app.get('total', 0) / 1024:.1f} KB) of ota_0 partition (2048K)")
           EOF
 
       - name: Package firmware (esp-claw format)
