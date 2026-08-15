@@ -112,6 +112,7 @@ jobs:
         working-directory: esp-claw
         run: |
           set -e
+          export PATH="$IDF_PATH/components/partition_table:$PATH"
           export EXAMPLE_DIR="application/edge_agent"
           export EXAMPLE_BOARD="${{ inputs.board || 'esp32_devkitc' }}"
           export EXAMPLE_BOARD_BRAND="community"
