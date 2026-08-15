@@ -49,7 +49,10 @@ jobs:
           path: esp-claw
 
       - name: Install board manager helper
-        run: python3 -m pip install esp-bmgr-assist
+        run: |
+          . $IDF_PATH/export.sh
+          python3 -m pip install --no-cache-dir esp-bmgr-assist
+          idf.py help | grep -q 'bmgr' && echo "bmgr command available" || { echo '::error::bmgr command not available'; exit 1; }
 
       - name: Install board into esp-claw
         run: |
