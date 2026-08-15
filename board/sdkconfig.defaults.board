@@ -26,7 +26,10 @@ CONFIG_APP_CLAW_LUA_MODULE_AUDIO=n
 CONFIG_ESP_BOARD_DEV_AUDIO_CODEC_SUPPORT=n
 
 # Disable capabilities not available on classic ESP32 (no PSRAM, limited RAM)
-CONFIG_APP_CLAW_CAP_MEMORY=n
+# Note: CAP_CORE (app_claw) unconditionally links claw_memory providers,
+# so CAP_MEMORY must stay enabled; use lightweight mode to save RAM.
+CONFIG_APP_CLAW_CAP_MEMORY=y
+CONFIG_APP_CLAW_MEMORY_MODE_LIGHTWEIGHT=y
 CONFIG_APP_CLAW_CAP_SCHEDULER=n
 CONFIG_APP_CLAW_CAP_ROUTER_MGR=n
 CONFIG_APP_CLAW_CAP_AGENT_MGR=n
