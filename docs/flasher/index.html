@@ -58,7 +58,7 @@
         .device-details { font-size: 0.85rem; color: #8b949e; font-family: monospace; }
         .log-area {
             background: #0d1117; border: 1px solid #30363d;
-            border-radius: 6px; padding: 1rem; height: 200px;
+            border-radius: 6px; padding: 1rem; height: 250px;
             overflow-y: auto; font-family: monospace; font-size: 0.8rem;
             color: #7ee787; white-space: pre-wrap;
         }
@@ -79,6 +79,9 @@
             width: 100%; padding: 0.75rem; background: #161b22;
             border: 1px solid #30363d; border-radius: 6px; color: #e6edf3;
         }
+        .firmware-select input[type="file"] { margin-top: 0.5rem; }
+        .firmware-select .radio-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+        .firmware-select .radio-row label { color: #e6edf3; display: flex; align-items: center; gap: 0.4rem; margin: 0; }
         .hidden { display: none !important; }
     </style>
 </head>
@@ -91,17 +94,17 @@
             <h3>⚠️ Requirements & Limitations</h3>
             <ul>
                 <li><strong>Browser:</strong> Chrome 89+ or Edge 89+ (Web Serial API required)</li>
-                <li><strong>Hardware:</strong> ESP32-DevKitC with CP2102 USB-to-UART bridge</li>
+                <li><strong>Hardware:</strong> ESP32-DevKitC with CP2102 USB-to-UART bridge (CH340 also works)</li>
                 <li><strong>Driver:</strong> CP2102 VCP driver must be installed on your OS</li>
                 <li><strong>Note:</strong> Classic ESP32 uses CP2102 (UART), NOT native USB - WebUSB NOT supported</li>
-                <li><strong>Firmware:</strong> You need the compiled edge_agent.bin file</li>
+                <li><strong>Firmware:</strong> Pick a release below (full-flash or esp-claw package), or upload your own .bin</li>
             </ul>
         </div>
 
         <div class="card">
             <h2>Step 1: Select Firmware</h2>
             <div class="firmware-select">
-                <label for="firmware-select">Choose firmware binary:</label>
+                <label for="firmware-select">Choose a release from GitHub:</label>
                 <select id="firmware-select">
                     <option value="">Loading available releases...</option>
                 </select>
@@ -109,6 +112,11 @@
             <div class="firmware-select">
                 <label>Or upload your own .bin file:</label>
                 <input type="file" id="firmware-upload" accept=".bin" style="display: block; margin-top: 0.5rem;">
+                <div class="radio-row">
+                    <label><input type="radio" name="upload-addr" value="0x0" checked> Full flash image (contains bootloader, offset 0x0)</label>
+                    <label><input type="radio" name="upload-addr" value="0x20000"> App only update (offset 0x20000)</label>
+                    <label><input type="radio" name="upload-addr" value="0x10000"> App only update (legacy 0x10000)</label>
+                </div>
             </div>
             <div id="firmware-status" class="status info">Select or upload a firmware binary to continue</div>
         </div>
@@ -116,6 +124,15 @@
         <div class="card">
             <h2>Step 2: Connect Device</h2>
             <button class="btn" id="connect-btn" disabled>Connect to ESP32</button>
+            <div class="firmware-select">
+                <label for="baud-select">Connection baud rate (CP2102 supports all):</label>
+                <select id="baud-select">
+                    <option value="115200">115200 (most reliable)</option>
+                    <option value="230400">230400</option>
+                    <option value="460800" selected>460800 (default, faster)</option>
+                    <option value="921600">921600 (fastest)</option>
+                </select>
+            </div>
             <div id="connect-status" class="status info">Select firmware first, then click Connect</div>
             <div id="device-list" class="device-list"></div>
         </div>
@@ -138,22 +155,25 @@
     </div>
 
     <script type="module">
-        import { ESPLoader } from 'https://cdn.jsdelivr.net/npm/esp-web-tools@1.4.0/dist/esp-loader.js';
+        import { ESPLoader, Transport, ClassicReset } from 'https://cdn.jsdelivr.net/npm/esptool-js@0.6.1/bundle.js';
+        import { gunzipSync } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/index.mjs';
 
         // Configuration - UPDATE THIS WITH YOUR GITHUB USERNAME/REPO
         const GITHUB_REPO = 'alphingj/ESPClaw-DevBoard';
+        const BOARD_NAME = 'esp32_devkitc';
         const FIRMWARE_BASE_URL = `https://github.com/${GITHUB_REPO}/releases/download`;
 
         // State
-        let selectedFirmware = null;
-        let selectedPort = null;
+        let selectedFirmware = null;   // { kind, files:[{data,address,name}], settings }
+        let transport = null;
         let loader = null;
-        let abortController = null;
+        let cancelRequested = false;
 
         // DOM Elements
         const firmwareSelect = document.getElementById('firmware-select');
         const firmwareUpload = document.getElementById('firmware-upload');
         const firmwareStatus = document.getElementById('firmware-status');
+        const baudSelect = document.getElementById('baud-select');
         const connectBtn = document.getElementById('connect-btn');
         const connectStatus = document.getElementById('connect-status');
         const deviceList = document.getElementById('device-list');
@@ -179,7 +199,34 @@
             el.className = 'status ' + type;
         }
 
-        // Load firmware releases from GitHub
+        // ---- Minimal TAR parser (gzip handled by fflate) ----
+        function parseTar(buffer) {
+            const files = new Map();
+            let offset = 0;
+            const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+            while (offset + 512 <= buffer.byteLength) {
+                const header = buffer.subarray(offset, offset + 512);
+                const nameBytes = header.subarray(0, 100);
+                if (nameBytes.every((b) => b === 0)) break; // end of archive
+                const sizeStr = String.fromCharCode(...header.subarray(124, 136)).replace(/\0/g, '').trim();
+                const typeflag = String.fromCharCode(header[156]);
+                const prefixBytes = header.subarray(345, 500);
+                const size = parseInt(sizeStr, 8) || 0;
+                if (!typeflag || typeflag === '0' || typeflag === '\0') {
+                    let name = String.fromCharCode(...nameBytes).replace(/\0/g, '').trim();
+                    const prefix = String.fromCharCode(...prefixBytes).replace(/\0/g, '').trim();
+                    if (prefix) name = prefix + '/' + name;
+                    files.set(name, buffer.subarray(offset + 512, offset + 512 + size));
+                }
+                const padded = Math.ceil(size / 512) * 512;
+                offset += 512 + padded;
+            }
+            return files;
+        }
+
+        function textDecoder() { return new TextDecoder(); }
+
+        // Load a release asset (tar.gz package preferred, fullflash.bin fallback)
         async function loadFirmwareReleases() {
             try {
                 log('Fetching firmware releases from GitHub...');
@@ -190,22 +237,21 @@
                 firmwareSelect.innerHTML = '<option value="">Select a release...</option>';
 
                 for (const release of releases) {
-                    for (const asset of release.assets) {
-                        if (asset.name.endsWith('.bin') && asset.name.includes('edge_agent')) {
-                            const option = document.createElement('option');
-                            option.value = asset.browser_download_url;
-                            option.textContent = release.tag_name + ' - ' + asset.name + ' (' + (asset.size/1024).toFixed(1) + ' KB)';
-                            option.dataset.size = asset.size;
-                            firmwareSelect.appendChild(option);
-                        }
-                    }
+                    const pick = pickBestAsset(release.assets);
+                    if (!pick) continue;
+                    const option = document.createElement('option');
+                    option.value = pick.asset.browser_download_url;
+                    option.dataset.kind = pick.kind;
+                    option.textContent = release.tag_name + ' - ' + pick.asset.name + ' (' + (pick.asset.size / 1024).toFixed(1) + ' KB)';
+                    option.dataset.downloadUrl = pick.asset.browser_download_url;
+                    firmwareSelect.appendChild(option);
                 }
 
                 if (firmwareSelect.options.length === 1) {
-                    firmwareSelect.innerHTML = '<option value="">No .bin files found in releases</option>';
-                    log('No firmware binaries found in GitHub releases', 'warn');
+                    firmwareSelect.innerHTML = '<option value="">No firmware found in releases (run the Release workflow on a tag)</option>';
+                    log('No firmware assets found in GitHub releases', 'warn');
                 } else {
-                    log('Found ' + (firmwareSelect.options.length - 1) + ' firmware binary(ies)');
+                    log('Found ' + (firmwareSelect.options.length - 1) + ' firmware release(s)');
                 }
             } catch (error) {
                 log('Failed to load releases: ' + error.message, 'error');
@@ -213,26 +259,40 @@
             }
         }
 
+        // Prefer the esp-claw .tar.gz package, fall back to fullflash.bin, then any edge_agent .bin
+        function pickBestAsset(assets) {
+            if (!assets) return null;
+            const targz = assets.find((a) => a.name.endsWith('.tar.gz') && a.name.includes(BOARD_NAME));
+            if (targz) return { kind: 'targz', asset: targz };
+            const full = assets.find((a) => a.name.endsWith('.bin') && a.name.includes('fullflash'));
+            if (full) return { kind: 'fullflash', asset: full };
+            const app = assets.find((a) => a.name.endsWith('.bin') && a.name.includes('edge_agent'));
+            if (app) return { kind: 'bin', asset: app };
+            return null;
+        }
+
         // Handle firmware selection
         firmwareSelect.addEventListener('change', async (e) => {
             const url = e.target.value;
+            const kind = e.target.selectedOptions[0] ? e.target.selectedOptions[0].dataset.kind : null;
             if (!url) {
                 selectedFirmware = null;
                 setStatus(firmwareStatus, 'Select or upload a firmware binary to continue', 'info');
                 connectBtn.disabled = true;
                 return;
             }
-
             try {
                 setStatus(firmwareStatus, 'Downloading firmware...', 'info');
-                log('Downloading firmware from ' + url + '...');
-
+                log('Downloading ' + url + '...');
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('Download failed: ' + response.status);
-
-                selectedFirmware = await response.arrayBuffer();
-                setStatus(firmwareStatus, 'Firmware loaded: ' + (selectedFirmware.byteLength/1024).toFixed(1) + ' KB', 'success');
-                log('Firmware loaded successfully (' + selectedFirmware.byteLength + ' bytes)');
+                const bytes = new Uint8Array(await response.arrayBuffer());
+                selectedFirmware = await prepareFirmware(bytes, kind);
+                setStatus(firmwareStatus,
+                    'Firmware ready: ' + selectedFirmware.files.length + ' image(s), ' +
+                    (selectedFirmware.files.reduce((s, f) => s + f.data.length, 0) / 1024).toFixed(1) + ' KB total',
+                    'success');
+                log('Firmware loaded: ' + selectedFirmware.files.map((f) => f.name + '@0x' + f.address.toString(16)).join(', '));
                 connectBtn.disabled = false;
             } catch (error) {
                 setStatus(firmwareStatus, 'Error: ' + error.message, 'error');
@@ -242,27 +302,74 @@
             }
         });
 
+        async function prepareFirmware(bytes, kind) {
+            if (kind === 'targz') {
+                const tarBytes = gunzipSync(bytes);
+                const tar = parseTar(tarBytes);
+                const argsRaw = tar.get('flasher_args.json');
+                if (!argsRaw) throw new Error('flasher_args.json missing from package (is it an esp-claw firmware package?)');
+                const args = JSON.parse(textDecoder().decode(argsRaw));
+                const settings = args.flash_settings || {};
+                const flashFiles = args.flash_files || {};
+                const files = [];
+                for (const [addr, path] of Object.entries(flashFiles)) {
+                    const data = tar.get(path);
+                    if (!data) throw new Error('Missing file in package: ' + path);
+                    files.push({ data, address: parseInt(addr, 16), name: path });
+                }
+                files.sort((a, b) => a.address - b.address);
+                return {
+                    kind: 'targz',
+                    files,
+                    settings: {
+                        flashMode: settings.flash_mode || 'qio',
+                        flashFreq: settings.flash_freq || '40m',
+                        flashSize: settings.flash_size || '4MB',
+                    },
+                };
+            }
+            if (kind === 'fullflash') {
+                return {
+                    kind: 'fullflash',
+                    files: [{ data: bytes, address: 0x0, name: 'fullflash' }],
+                    settings: { flashMode: 'qio', flashFreq: '40m', flashSize: '4MB' },
+                };
+            }
+            // kind === 'bin' (released edge_agent.bin): app image at its partition offset
+            return {
+                kind: 'bin',
+                files: [{ data: bytes, address: parseInt(document.querySelector('input[name="upload-addr"]:checked').value, 16), name: 'app' }],
+                settings: { flashMode: 'qio', flashFreq: '40m', flashSize: '4MB' },
+            };
+        }
+
         // Handle firmware upload
         firmwareUpload.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
-
             if (!file.name.endsWith('.bin')) {
                 setStatus(firmwareStatus, 'Please select a .bin file', 'error');
                 return;
             }
-
             const reader = new FileReader();
-            reader.onload = (event) => {
-                selectedFirmware = event.target.result;
-                setStatus(firmwareStatus, 'Custom firmware loaded: ' + (selectedFirmware.byteLength/1024).toFixed(1) + ' KB', 'success');
-                log('Custom firmware loaded: ' + file.name + ' (' + selectedFirmware.byteLength + ' bytes)');
-                connectBtn.disabled = false;
-                firmwareSelect.value = '';
+            reader.onload = async (event) => {
+                try {
+                    const bytes = new Uint8Array(event.target.result);
+                    const address = parseInt(document.querySelector('input[name="upload-addr"]:checked').value, 16);
+                    selectedFirmware = {
+                        kind: 'upload',
+                        files: [{ data: bytes, address, name: file.name }],
+                        settings: { flashMode: 'qio', flashFreq: '40m', flashSize: '4MB' },
+                    };
+                    setStatus(firmwareStatus, 'Custom firmware loaded: ' + file.name + ' @0x' + address.toString(16) + ' (' + bytes.length + ' bytes)', 'success');
+                    log('Custom firmware loaded: ' + file.name + ' @0x' + address.toString(16) + ' (' + bytes.length + ' bytes)');
+                    connectBtn.disabled = false;
+                    firmwareSelect.value = '';
+                } catch (err) {
+                    setStatus(firmwareStatus, 'Failed to read file: ' + err.message, 'error');
+                }
             };
-            reader.onerror = () => {
-                setStatus(firmwareStatus, 'Failed to read file', 'error');
-            };
+            reader.onerror = () => setStatus(firmwareStatus, 'Failed to read file', 'error');
             reader.readAsArrayBuffer(file);
         });
 
@@ -273,109 +380,134 @@
                 log('Web Serial API not available in this browser', 'error');
                 return;
             }
-
             try {
                 setStatus(connectStatus, 'Requesting port access...', 'info');
                 log('Requesting serial port access...');
-
-                // Request port with CP2102 filters
-                const ports = await navigator.serial.requestPort({
+                const port = await navigator.serial.requestPort({
                     filters: [
                         { usbVendorId: 0x10C4, usbProductId: 0xEA60 }, // CP2102
                         { usbVendorId: 0x10C4, usbProductId: 0xEA61 }, // CP2102N
-                        { usbVendorId: 0x1A86, usbProductId: 0x7523 }, // CH340 (common alternative)
-                    ]
+                        { usbVendorId: 0x1A86, usbProductId: 0x7523 }, // CH340
+                    ],
                 });
 
-                selectedPort = ports;
-                await selectedPort.open({ baudRate: 115200 });
+                transport = new Transport(port, false);
+                transport.setDeviceLostCallback((detail) => {
+                    log('Device connection lost: ' + (detail || 'unplugged'), 'error');
+                    setStatus(connectStatus, 'Device disconnected - reconnect to continue', 'error');
+                    flashBtn.disabled = true;
+                });
 
-                const info = selectedPort.getInfo();
-                log('Connected to port: ' + (info.usbVendorId ? 'VID:' + info.usbVendorId.toString(16).toUpperCase() + ' PID:' + info.usbProductId.toString(16).toUpperCase() : 'Unknown'));
+                const baudRate = parseInt(baudSelect.value, 10);
+                loader = new ESPLoader({
+                    transport,
+                    baudrate: baudRate,
+                    terminal: {
+                        clean: () => {},
+                        writeLine: (line) => { if (line && line.trim()) log(line.trim(), 'info'); },
+                    },
+                });
 
-                // Test connection with ESPLoader
-                loader = new ESPLoader(selectedPort, 115200, log);
-                await loader.connect();
+                log('Connecting to chip at ' + baudRate + ' baud...');
+                const chipDescription = await loader.main();
+                const chipName = (loader.chip && loader.chip.CHIP_NAME) || '';
+                log('Chip: ' + chipDescription + (chipName ? ' (' + chipName + ')' : ''));
 
-                const chipInfo = await loader.getChipInfo();
-                log('Chip detected: ' + chipInfo.chipName + ' (' + chipInfo.chipFamily + ')');
-                log('MAC: ' + chipInfo.mac);
-                log('Flash size: ' + chipInfo.flashSize + ' bytes');
+                let flashSize = '';
+                try { flashSize = await loader.detectFlashSize(); log('Flash size: ' + flashSize); } catch { /* ignore */ }
 
-                // Display device info
                 deviceList.innerHTML = '' +
                     '<div class="device-item">' +
                     '<div class="device-info">' +
-                    '<div class="device-name">' + chipInfo.chipName + ' (Classic ESP32)</div>' +
-                    '<div class="device-details">MAC: ' + chipInfo.mac + ' | Flash: ' + (chipInfo.flashSize/1024/1024).toFixed(1) + 'MB</div>' +
+                    '<div class="device-name">' + (chipName || chipDescription) + ' (Classic ESP32)</div>' +
+                    '<div class="device-details">Flash: ' + (flashSize || 'unknown') + '</div>' +
                     '</div>' +
                     '</div>';
                 deviceList.style.display = 'flex';
 
-                setStatus(connectStatus, 'Connected: ' + chipInfo.chipName, 'success');
+                setStatus(connectStatus, 'Connected: ' + (chipName || chipDescription), 'success');
                 connectBtn.disabled = true;
-                connectBtn.textContent = 'Connected \u2713';
+                connectBtn.textContent = 'Connected ✓';
                 flashBtn.disabled = !selectedFirmware;
-
             } catch (error) {
                 setStatus(connectStatus, 'Connection failed: ' + error.message, 'error');
                 log('Connection error: ' + error.message, 'error');
-                selectedPort = null;
+                transport = null;
                 loader = null;
             }
         });
 
         // Flash firmware
         flashBtn.addEventListener('click', async () => {
-            if (!selectedFirmware || !selectedPort || !loader) {
+            if (!selectedFirmware || !transport || !loader) {
                 setStatus(flashStatus, 'Missing firmware or device connection', 'error');
                 return;
             }
 
-            abortController = new AbortController();
+            cancelRequested = false;
             flashBtn.disabled = true;
             cancelBtn.classList.remove('hidden');
-            cancelBtn.disabled = false;
             progressContainer.classList.add('visible');
             progressFill.style.width = '0%';
             progressText.textContent = 'Preparing flash...';
 
             try {
-                log('Starting firmware flash...');
+                log('Starting flash (' + selectedFirmware.files.length + ' image(s))...');
                 setStatus(flashStatus, 'Flashing firmware...', 'info');
 
-                // Flash the firmware
+                const totalBytes = selectedFirmware.files.reduce((s, f) => s + f.data.length, 0);
+                let bytesDone = 0;
+
+                const onProgress = (fileIndex, bytesSent, fileSize) => {
+                    if (cancelRequested) throw new Error('Flashing cancelled by user');
+                    const fileBytes = selectedFirmware.files.reduce((s, f, i) => s + (i < fileIndex ? f.data.length : 0), 0);
+                    const done = fileBytes + bytesSent;
+                    const percent = Math.min(100, Math.round((done / totalBytes) * 100));
+                    progressFill.style.width = percent + '%';
+                    progressText.textContent = 'Flashing: ' + percent + '%' +
+                        ' (file ' + (fileIndex + 1) + '/' + selectedFirmware.files.length + ')';
+                };
+
                 await loader.writeFlash({
-                    data: selectedFirmware,
-                    address: 0x10000, // App partition offset for ESP32
-                    onProgress: (progress) => {
-                        const percent = Math.round(progress * 100);
-                        progressFill.style.width = percent + '%';
-                        progressText.textContent = 'Flashing: ' + percent + '%';
-                    }
-                }, abortController.signal);
+                    fileArray: selectedFirmware.files.map((f) => ({ data: f.data, address: f.address })),
+                    flashMode: selectedFirmware.settings.flashMode,
+                    flashFreq: selectedFirmware.settings.flashFreq,
+                    flashSize: selectedFirmware.settings.flashSize,
+                    eraseAll: false,
+                    compress: true,
+                    reportProgress: onProgress,
+                });
+                bytesDone = totalBytes;
 
-                // Verify
+                // Light verification: read back first 64 bytes of each written region
                 progressText.textContent = 'Verifying flash...';
-                await loader.verifyFlash({
-                    data: selectedFirmware,
-                    address: 0x10000,
-                    onProgress: (progress) => {
-                        const percent = Math.round(progress * 100);
-                        progressFill.style.width = percent + '%';
-                        progressText.textContent = 'Verifying: ' + percent + '%';
+                for (const f of selectedFirmware.files) {
+                    if (cancelRequested) throw new Error('Flashing cancelled by user');
+                    const readBack = await loader.readFlash(f.address, Math.min(f.data.length, 64));
+                    const got = readBack.length > 0 ? readBack[0] : new Uint8Array(0);
+                    const expected = f.data.subarray(0, 64);
+                    let match = got.length === expected.length;
+                    if (match) {
+                        for (let i = 0; i < expected.length; i++) {
+                            if (got[i] !== expected[i]) { match = false; break; }
+                        }
                     }
-                }, abortController.signal);
+                    if (!match) throw new Error('Verification failed at 0x' + f.address.toString(16) + ' (' + f.name + ')');
+                }
+                progressText.textContent = 'Verify OK (' + bytesDone + ' bytes)';
 
-                // Success
+                // Reboot the chip so it boots the new firmware
+                const reset = new ClassicReset(transport, 50);
+                await reset.reset();
+                progressText.textContent = 'Device rebooting...';
+
                 progressFill.style.width = '100%';
                 progressText.textContent = 'Flash complete!';
-                setStatus(flashStatus, 'Firmware flashed successfully! \uD83C\uDF89', 'success');
+                setStatus(flashStatus, 'Firmware flashed successfully! 🎉', 'success');
                 log('Firmware flashed and verified successfully!', 'success');
-                log('Device will reboot. Check serial monitor for ESP-Claw startup.', 'info');
-
+                log('Device should reboot and start ESP-Claw. Check the serial monitor (115200 baud).', 'info');
             } catch (error) {
-                if (error.name === 'AbortError') {
+                if (cancelRequested) {
                     setStatus(flashStatus, 'Flash cancelled by user', 'warning');
                     log('Flash cancelled by user', 'warning');
                 } else {
@@ -385,15 +517,14 @@
             } finally {
                 flashBtn.disabled = false;
                 cancelBtn.classList.add('hidden');
-                cancelBtn.disabled = true;
             }
         });
 
         // Cancel flash
         cancelBtn.addEventListener('click', () => {
-            if (abortController) {
-                abortController.abort();
-            }
+            cancelRequested = true;
+            cancelBtn.disabled = true;
+            log('Cancelling flash...', 'warn');
         });
 
         // Initialize

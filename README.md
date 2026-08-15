@@ -64,7 +64,9 @@ This repository contains:
 - sdkconfig.defaults.board - Default SDK configuration
 - setup_device.c - Minimal board initialization code
 - README.md - This documentation
-- partitions_4MB.csv - 4MB flash partition table
+- partitions_4MB.csv - 4MB flash partition table (ota_0 1500K / system 1100K / storage 900K)
+- .github/workflows/release-firmware.yml - Builds edge_agent and publishes firmware to GitHub Releases
+- docs/flasher/ - Web Serial browser flasher (GitHub Pages)
 
 ## GPIO Mapping
 
@@ -103,16 +105,32 @@ Visit the hosted web flasher at: **https://alphingj.github.io/ESPClaw-DevBoard/f
 This web-based flasher uses the **Web Serial API** (Chrome/Edge 89+) to flash ESP-Claw firmware directly to your ESP32-DevKitC via USB. No command line tools required!
 
 ### Features:
-- ✅ Select firmware from GitHub Releases automatically
-- ✅ Upload custom `.bin` files
+- ✅ Select firmware from GitHub Releases automatically (esp-claw package `.tar.gz` preferred)
+- ✅ Merged full-flash image (`edge_agent-esp32_devkitc-fullflash.bin`, bootloader + partition table + app + system/storage images in one file)
+- ✅ Upload custom `.bin` files (full-flash at 0x0 or app-only at 0x20000)
 - ✅ Auto-detect CP2102/CH340 USB-to-UART bridges
-- ✅ Real-time flash progress with verification
+- ✅ Real-time flash progress with read-back verification
+- ✅ Configurable baud rate (115200 to 921600)
 - ✅ Works with classic ESP32 (CP2102) - NOT WebUSB, uses Web Serial API
 
 ### Requirements:
 - Chrome 89+ or Edge 89+ (Web Serial API)
 - CP2102 VCP driver installed on your OS
 - ESP32-DevKitC connected via USB
+
+### How firmware gets into GitHub Releases
+Firmware is built automatically by the **Release Firmware** GitHub Actions workflow (`.github/workflows/release-firmware.yml`). To publish a new firmware:
+
+1. Push a tag, e.g.:
+   ```bash
+   git tag v1.0.0 && git push origin v1.0.0
+   ```
+2. The workflow clones `espressif/esp-claw`, installs the board configuration from `board/`, builds `edge_agent` for `esp32` in the official `espressif/idf:release-v5.5` container, and publishes a GitHub Release with:
+   - `esp32_devkitc__uart_console.tar.gz` - esp-claw package (flasher_args.json + per-partition images)
+   - `edge_agent-esp32_devkitc-fullflash.bin` - merged full-flash image (offset 0x0)
+   - `edge_agent.bin` - raw application image
+
+You can also trigger the workflow manually (Actions tab) for a test build without creating a release.
 
 ### Alternative: Built-in OTA Flasher
 After initial flash via Web Serial, the device runs a built-in OTA flasher accessible at `http://<device-ip>/flash` for future updates over Wi-Fi.

@@ -1,0 +1,127 @@
+name: Release Firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      espressif_ref:
+        description: "espressif/esp-claw git ref to build against"
+        required: false
+        default: master
+      board:
+        description: "Board name (from board_info.yaml)"
+        required: false
+        default: esp32_devkitc
+      target:
+        description: "ESP-IDF target"
+        required: false
+        default: esp32
+      idf_image:
+        description: "espressif/idf docker image tag"
+        required: false
+        default: release-v5.5
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:${{ inputs.idf_image || 'release-v5.5' }}
+    env:
+      IDF_CCACHE_ENABLE: "1"
+    steps:
+      - name: Checkout ESPClaw-DevBoard
+        uses: actions/checkout@v4
+        with:
+          path: ESPClaw-DevBoard
+
+      - name: Checkout esp-claw (${{ inputs.espressif_ref || 'master' }})
+        uses: actions/checkout@v4
+        with:
+          repository: espressif/esp-claw
+          ref: ${{ inputs.espressif_ref || 'master' }}
+          submodules: recursive
+          fetch-depth: 1
+          path: esp-claw
+
+      - name: Install board manager helper
+        run: pip install esp-bmgr-assist
+
+      - name: Install board into esp-claw
+        run: |
+          set -e
+          EDGE="esp-claw/application/edge_agent"
+          BOARD_DIR="${EDGE}/boards/community/esp32_devkitc"
+          mkdir -p "${BOARD_DIR}"
+          cp -rv ESPClaw-DevBoard/board/* "${BOARD_DIR}/"
+          cp -v ESPClaw-DevBoard/partitions_4MB.csv "${EDGE}/partitions_4MB.csv"
+          echo "--- installed board files ---"
+          ls -la "${BOARD_DIR}"
+
+      - name: Generate board code
+        working-directory: esp-claw/application/edge_agent
+        run: |
+          set -e
+          . $IDF_PATH/export.sh
+          idf.py bmgr -c ./boards -b ${{ inputs.board || 'esp32_devkitc' }}
+
+      - name: Build (target ${{ inputs.target || 'esp32' }})
+        working-directory: esp-claw/application/edge_agent
+        run: |
+          set -e
+          . $IDF_PATH/export.sh
+          idf.py set-target ${{ inputs.target || 'esp32' }}
+          idf.py build 2>&1 | tee build_log.txt
+          tail -1 build_log.txt | grep -q 'Project build complete' || { echo '::error::Build did not complete - see build_log.txt'; exit 1; }
+
+      - name: Report app size
+        working-directory: esp-claw/application/edge_agent
+        run: |
+          python3 - <<'EOF'
+          import json
+          with open('build/size.json') as f:
+              size = json.load(f)
+          app = size.get('app', {})
+          print(f"::notice::edge_agent app size: {app.get('total', 'n/a')} bytes "
+                f"({app.get('total', 0) / 1024:.1f} KB) of ota_0 partition (1500K)")
+          EOF
+
+      - name: Package firmware (esp-claw format)
+        working-directory: esp-claw
+        run: |
+          set -e
+          export EXAMPLE_DIR="application/edge_agent"
+          export EXAMPLE_BOARD="${{ inputs.board || 'esp32_devkitc' }}"
+          export EXAMPLE_BOARD_BRAND="community"
+          export EXAMPLE_TARGET="${{ inputs.target || 'esp32' }}"
+          export CI_COMMIT_TAG="${GITHUB_REF_NAME}"
+          python .gitlab/ci/package_firmware.py
+          ls -la firmware_output/
+
+      - name: Create merged full-flash image
+        working-directory: esp-claw/application/edge_agent/build
+        run: |
+          set -e
+          FULLFLASH="edge_agent-${{ inputs.board || 'esp32_devkitc' }}-fullflash.bin"
+          python "$IDF_PATH/components/esptool_py/esptool/esptool.py" \
+            --chip ${{ inputs.target || 'esp32' }} merge_bin -o "${FULLFLASH}" @flash_args
+          ls -la "${FULLFLASH}"
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            esp-claw/application/edge_agent/build/edge_agent-*.bin
+            esp-claw/application/edge_agent/build/edge_agent.bin
+            esp-claw/firmware_output/*.tar.gz
+            esp-claw/firmware_output/*.json
+            esp-claw/application/edge_agent/build_log.txt
