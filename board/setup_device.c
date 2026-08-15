@@ -8,10 +8,6 @@
 #include "esp_check.h"
 #include "esp_board_manager_includes.h"
 #include "gen_board_device_custom.h"
-#include "led_strip.h"
-#include "led_strip_rmt.h"
-#include "led_strip_types.h"
-#include "periph_rmt.h"
 
 static const char *TAG = "ESP32_DEVKITC_SETUP_DEVICE";
 
