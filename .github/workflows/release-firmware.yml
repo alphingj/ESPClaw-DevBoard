@@ -125,6 +125,7 @@ jobs:
         working-directory: esp-claw/application/edge_agent/build
         run: |
           set -e
+          . $IDF_PATH/export.sh
           FULLFLASH="edge_agent-${{ inputs.board || 'esp32_devkitc' }}-fullflash.bin"
           python "$IDF_PATH/components/esptool_py/esptool/esptool.py" \
             --chip ${{ inputs.target || 'esp32' }} merge_bin -o "${FULLFLASH}" @flash_args
