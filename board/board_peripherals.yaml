@@ -1,0 +1,44 @@
+version: 1.0.0
+# Peripherals Configuration for ESP32-DevKitC (Classic ESP32)
+# Basic configuration for a minimal ESP32 dev board with CP2102 USB-to-UART
+
+peripherals:
+  # I2C Configuration (default ESP32-DevKitC I2C pins: SDA=GPIO21, SCL=GPIO22)
+  - name: i2c_master
+    type: i2c
+    role: master
+    config:
+      port: 0
+      pins:
+        sda: 21
+        scl: 22
+
+  # UART0 for console (connected to CP2102 USB-to-UART bridge)
+  # TX=GPIO1, RX=GPIO3 (fixed hardware UART0 pins)
+  - name: uart_console
+    type: uart
+    role: master
+    config:
+      port: 0
+      baud_rate: 115200
+      data_bits: 8
+      parity: none
+      stop_bits: 1
+      flow_control: none
+      pins:
+        tx: 1
+        rx: 3
+
+  # SPI bus for external devices (if needed)
+  - name: spi_master
+    type: spi
+    role: master
+    config:
+      spi_bus_config:
+        spi_port: SPI2_HOST
+        mosi_io_num: 23
+        miso_io_num: 19
+        sclk_io_num: 18
+        quadwp_io_num: -1
+        quadhd_io_num: -1
+        max_transfer_sz: 4096

@@ -1,0 +1,5 @@
+board: esp32_devkitc
+chip: esp32
+version: 1.0.0
+description: "ESP32-DevKitC Development Board (Classic ESP32 with CP2102 USB-to-UART)"
+manufacturer: "ESPRESSIF"

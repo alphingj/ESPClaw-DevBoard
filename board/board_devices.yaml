@@ -1,0 +1,34 @@
+version: 1.0.0
+# Devices Configuration for ESP32-DevKitC (Classic ESP32)
+# Minimal devices available on a standard ESP32-DevKitC board
+
+devices:
+  # Built-in Blue LED (active low, GPIO 2)
+  - name: status_led
+    chip: gpio_led
+    type: custom
+    version: 1.0.0
+    init_skip: true
+    config:
+      gpio_num: 2
+      active_level: 0
+
+  # BOOT Button (active low, GPIO 0)
+  - name: boot_button
+    chip: gpio_button
+    type: custom
+    version: 1.0.0
+    init_skip: true
+    config:
+      gpio_num: 0
+      active_level: 0
+
+  # EN Button (Reset - not typically used as input, but can be)
+  # - name: en_button
+  #   chip: gpio_button
+  #   type: custom
+  #   version: 1.0.0
+  #   init_skip: true
+  #   config:
+  #     gpio_num: 39  # EN pin is not a GPIO, this is just for reference
+  #     active_level: 0
