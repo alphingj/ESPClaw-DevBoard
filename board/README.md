@@ -56,6 +56,17 @@ The console uses UART0 (GPIO1/3) via the CP2102 USB-to-UART bridge. No special d
 
 ## Build & Flash
 
+### Option 1: Web Serial Flasher (Easiest - No Tools Required!)
+**Flash directly from your browser:** https://alphingj.github.io/ESPClaw-DevBoard/flasher/
+
+1. Open the link in **Chrome 89+** or **Edge 89+**
+2. Select firmware from GitHub Releases (or upload your own `.bin`)
+3. Click "Connect to ESP32" → Select your CP2102 device
+4. Click "Start Flashing" → Wait for completion
+5. Done! No ESP-IDF or command line needed.
+
+### Option 2: Command Line (Traditional)
+
 ```bash
 cd application/edge_agent
 
