@@ -36,7 +36,7 @@ Due to hardware limitations of the classic ESP32, certain features are not avail
 ### Steps
 
 1. Clone this repository:
-   git clone https://github.com/alphingj/ESPClaw-DevBoard.git
+   git clone https://github.com/yourusername/ESPClaw-DevBoard.git
 
 2. Copy the board configuration to your esp-claw installation:
    cp -r ESPClaw-DevBoard/board/ esp-claw/application/edge_agent/boards/community/esp32_devkitc/
@@ -94,10 +94,28 @@ Once flashed, you can use ESP-Claw to:
 - Run Lua scripts for automation
 - Use skills for extended functionality
 
-## Web Flasher
+## Web Flasher (GitHub Pages)
 
-For a detailed guide on using the built-in web flasher, see the [Flasher Guide](docs/flasher/index.md).
-The web flasher is accessible at `http://<device-ip>/flash` after building and flashing the firmware.
+**Flash your ESP32-DevKitC directly from the browser!** 
+
+Visit the hosted web flasher at: **https://YOUR_USERNAME.github.io/ESPClaw-DevBoard/flasher/**
+
+This web-based flasher uses the **Web Serial API** (Chrome/Edge 89+) to flash ESP-Claw firmware directly to your ESP32-DevKitC via USB. No command line tools required!
+
+### Features:
+- ✅ Select firmware from GitHub Releases automatically
+- ✅ Upload custom `.bin` files
+- ✅ Auto-detect CP2102/CH340 USB-to-UART bridges
+- ✅ Real-time flash progress with verification
+- ✅ Works with classic ESP32 (CP2102) - NOT WebUSB, uses Web Serial API
+
+### Requirements:
+- Chrome 89+ or Edge 89+ (Web Serial API)
+- CP2102 VCP driver installed on your OS
+- ESP32-DevKitC connected via USB
+
+### Alternative: Built-in OTA Flasher
+After initial flash via Web Serial, the device runs a built-in OTA flasher accessible at `http://<device-ip>/flash` for future updates over Wi-Fi.
 
 
 ## Important Notes
