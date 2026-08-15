@@ -96,9 +96,9 @@ Once flashed, you can use ESP-Claw to:
 
 ## Web Flasher
 
-ESP-Claw includes a built-in web flasher. After building the firmware:
-1. Visit http://<device-ip>/flash in your browser
-2. Or use the online flasher at https://esp-claw.com/en/flash/
+For a detailed guide on using the built-in web flasher, see the [Flasher Guide](docs/flasher/index.md).
+The web flasher is accessible at `http://<device-ip>/flash` after building and flashing the firmware.
+
 
 ## Important Notes
 
