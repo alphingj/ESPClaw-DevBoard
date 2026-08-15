@@ -19,11 +19,17 @@ CONFIG_LEDC_ENABLE=y
 # Enable GPIO for button/LED
 CONFIG_GPIO_ENABLE=y
 
-# Disable features that require PSRAM or specific newer chips
+# Disable features that require PSRAM, a display, or newer chips
 CONFIG_APP_CLAW_LUA_MODULE_CAMERA=n
 CONFIG_APP_CLAW_LUA_MODULE_VISION=n
 CONFIG_APP_CLAW_LUA_MODULE_AUDIO=n
 CONFIG_ESP_BOARD_DEV_AUDIO_CODEC_SUPPORT=n
+# No LCD on DevKitC: drop LVGL/freetype/esp_lcd/esp_new_jpeg bloat
+CONFIG_APP_CLAW_LUA_MODULE_LVGL=n
+CONFIG_APP_CLAW_LUA_MODULE_DISPLAY=n
+CONFIG_APP_CLAW_LUA_MODULE_IMAGE=n
+CONFIG_APP_CLAW_LUA_MODULE_LCD_TOUCH=n
+CONFIG_APP_CLAW_LUA_MODULE_LED_STRIP=n
 
 # Disable capabilities not available on classic ESP32 (no PSRAM, limited RAM)
 # Note: CAP_CORE (app_claw) unconditionally links claw_memory providers,
