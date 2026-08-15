@@ -49,7 +49,7 @@ jobs:
           path: esp-claw
 
       - name: Install board manager helper
-        run: pip install esp-bmgr-assist
+        run: python3 -m pip install esp-bmgr-assist
 
       - name: Install board into esp-claw
         run: |
