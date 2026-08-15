@@ -36,7 +36,7 @@ Due to hardware limitations of the classic ESP32, certain features are not avail
 ### Steps
 
 1. Clone this repository:
-   git clone https://github.com/yourusername/ESPClaw-DevBoard.git
+   git clone https://github.com/alphingj/ESPClaw-DevBoard.git
 
 2. Copy the board configuration to your esp-claw installation:
    cp -r ESPClaw-DevBoard/board/ esp-claw/application/edge_agent/boards/community/esp32_devkitc/
