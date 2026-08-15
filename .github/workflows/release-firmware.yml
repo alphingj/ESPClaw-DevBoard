@@ -91,7 +91,9 @@ jobs:
       - name: Report app size
         working-directory: esp-claw/application/edge_agent
         run: |
-          python3 - <<'EOF'
+          set -e
+          if [ -f build/size.json ]; then
+            python3 - <<'EOF'
           import json
           with open('build/size.json') as f:
               size = json.load(f)
@@ -99,6 +101,12 @@ jobs:
           print(f"::notice::edge_agent app size: {app.get('total', 'n/a')} bytes "
                 f"({app.get('total', 0) / 1024:.1f} KB) of ota_0 partition (2048K)")
           EOF
+          elif [ -f build/edge_agent.bin ]; then
+            APP_SIZE=$(stat -c%s build/edge_agent.bin 2>/dev/null || stat -f%z build/edge_agent.bin)
+            echo "::notice::edge_agent.bin size: ${APP_SIZE} bytes ($((APP_SIZE / 1024)) KB) of ota_0 partition (2048K)"
+          else
+            echo "::notice::app binary not found; skipping size report"
+          fi
 
       - name: Package firmware (esp-claw format)
         working-directory: esp-claw
