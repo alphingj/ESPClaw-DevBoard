@@ -64,6 +64,14 @@ jobs:
           echo "--- installed board files ---"
           ls -la "${BOARD_DIR}"
 
+      # The classic ESP32 has no PSRAM and cannot run the LVGL system UI, so
+      # the 1.1MB NotoSansSC font in the base system image is unusable and
+      # does not fit the 4MB layout. Trim it before fatfsgen packs the image.
+      - name: Trim unusable system fonts (no LVGL/PSRAM on classic ESP32)
+        run: |
+          rm -rf esp-claw/application/edge_agent/fatfs_image/system/fonts
+          echo "Removed system fonts (saved ~1.1MB)"
+
       - name: Generate board code
         working-directory: esp-claw/application/edge_agent
         run: |

@@ -2,6 +2,6 @@
 nvs,       data, nvs,     0xA000,   0x6000
 otadata,   data, ota,     0x10000,  0x2000
 phy_init,  data, phy,     0x12000,  0x1000
-ota_0,     app,  ota_0,   0x20000,  1500K
-system,    data, fat,     0x197000, 1100K
-storage,   data, fat,     0x2AA000, 900K
+ota_0,     app,  ota_0,   0x20000,  1600K
+system,    data, fat,     0x1B0000, 800K
+storage,   data, fat,     0x278000, 800K
