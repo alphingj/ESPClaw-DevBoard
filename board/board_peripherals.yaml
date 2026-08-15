@@ -17,17 +17,16 @@ peripherals:
   # TX=GPIO1, RX=GPIO3 (fixed hardware UART0 pins)
   - name: uart_console
     type: uart
-    role: master
     config:
-      port: 0
-      baud_rate: 115200
-      data_bits: 8
-      parity: none
-      stop_bits: 1
-      flow_control: none
-      pins:
-        tx: 1
-        rx: 3
+      uart_num: UART_NUM_0
+      tx_io_num: 1
+      rx_io_num: 3
+      uart_config:
+        baud_rate: 115200
+        data_bits: UART_DATA_8_BITS
+        parity: UART_PARITY_DISABLE
+        stop_bits: UART_STOP_BITS_1
+        flow_ctrl: UART_HW_FLOWCTRL_DISABLE
 
   # SPI bus for external devices (if needed)
   - name: spi_master
